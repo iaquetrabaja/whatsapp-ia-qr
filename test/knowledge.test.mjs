@@ -22,3 +22,4 @@ test('API connector exposes only selected fields, not authorization or other rec
  assert.ok(context.includes('3'));assert.ok(!context.includes('private-customer'));assert.ok(!context.includes('private-token'));assert.equal(request.headers.Authorization,'Bearer private-token');assert.equal(request.redirects,0);
  assert.throws(()=>validateConnector({url:'https://example.com',fields:'stock'},'tools'));assert.throws(()=>validateConnector({url:'https://example.com?key=secret',fields:'stock'},'standalone'));
 });
+test('API arrays can expose product names without leaking unrelated fields',async()=>{const text=await connectorContext({enabled:true,url:'https://example.com/products',fields:'items.name',header:'X-API-Key'},'secret',{getter:async(u,o)=>{assert.equal(o.headers['X-API-Key'],'secret');return{text:JSON.stringify([{name:'Bike',internal:'private-data'}])};}});assert.ok(text.includes('Bike'));assert.ok(!text.includes('private-data'));});

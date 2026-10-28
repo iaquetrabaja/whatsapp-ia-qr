@@ -17,7 +17,7 @@ export function validateFlow(input) {
   if(typeof input.websiteUrl!=='string'||input.websiteUrl.length>2000||typeof input.autoRefresh!=='boolean')throw Error('Revisa la URL de la web');
   if(input.enabled&&(!input.disclosureAccepted||(!input.context.trim()&&!input.websiteUrl)||(input.pilot&&!input.allowedPhones.length)))throw Error('Añade contexto o una web analizada, autoriza el tratamiento y configura un número de prueba.');
   const output=Object.fromEntries(['id','name','provider','model','context','websiteUrl','autoRefresh','instructions','trigger','keyword','maxRequests','maxTokens','pilot','allowedPhones','disclosureAccepted','enabled'].map(k=>[k,input[k]]));
-  output.connector={enabled:input.connector?.enabled===true,url:String(input.connector?.url||'').slice(0,2000),fields:String(input.connector?.fields||'').slice(0,1000)};return output;
+  output.connector={enabled:input.connector?.enabled===true,url:String(input.connector?.url||'').slice(0,2000),fields:String(input.connector?.fields||'').slice(0,1000),header:input.connector?.header||'Authorization'};return output;
 }
 export function publicWorkspace(workspace) { return {activeFlowId:workspace.activeFlowId,flows:workspace.flows.map(f=>({...f,apiKeyConfigured:!!workspace.keys?.[f.provider],connectorSecretConfigured:!!workspace.connectorSecrets?.[f.id]}))}; }
 export function portableWorkspace(workspace) {return {version:2,activeFlowId:workspace.activeFlowId,flows:workspace.flows.map(f=>({...f,connector:{...f.connector,enabled:false},enabled:false,disclosureAccepted:false,allowedPhones:[]}))};}

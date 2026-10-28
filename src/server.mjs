@@ -57,7 +57,7 @@ const html=await readFile(path.join(ROOT,'public/index.html')),js=await readFile
 function json(res,code,data){res.writeHead(code,{'Content-Type':'application/json; charset=utf-8'});res.end(JSON.stringify(data));}
 async function body(req){
  if(!(req.headers['content-type']||'').startsWith('application/json'))throw Error('Se necesita JSON');
- let n=0,chunks=[];for await(const c of req){n+=c.length;if(n>50000)throw Error('Petición demasiado grande');chunks.push(c);}return JSON.parse(Buffer.concat(chunks).toString());
+ let n=0,chunks=[];for await(const c of req){n+=c.length;if(n>50000)throw Error('Petición demasiado grande');chunks.push(c);}try{return JSON.parse(Buffer.concat(chunks).toString());}catch{throw Error('JSON no válido');}
 }
 const server=http.createServer(async(req,res)=>{
  res.setHeader('Cache-Control','no-store');res.setHeader('X-Content-Type-Options','nosniff');res.setHeader('Referrer-Policy','no-referrer');

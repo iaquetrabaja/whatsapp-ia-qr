@@ -33,10 +33,10 @@ En la tarjeta **Consulta la API de tu web**, configura:
 
 1. URL exacta del endpoint GET, sin secretos ni parámetros en la URL.
 2. Campos JSON permitidos, por ejemplo `products,stock.available`.
-3. Autorización opcional, por ejemplo `Bearer TU_TOKEN`; se cifra y nunca se añade al prompt ni se exporta.
+3. Autorización opcional mediante `Authorization` (por ejemplo `Bearer TU_TOKEN` o `Basic ...`) o `X-API-Key`; se cifra y nunca se añade al prompt ni se exporta.
 4. Guarda y prueba la consulta. Actívala cuando hayas verificado qué información recibe el modelo.
 
-Se consulta el endpoint al preparar una respuesta y solo se añaden al modelo los campos elegidos. Si la raíz de la respuesta es un array, usa el campo `items` (hasta 20 elementos). Las respuestas se limitan a 64 KB y el extracto de contexto a 4.000 caracteres. No se siguen redirecciones con credenciales. Si una consulta falla, no se inventan datos.
+Se consulta el endpoint al preparar una respuesta y solo se añaden al modelo los campos elegidos. Si la raíz de la respuesta es un array, usa campos como `items.name,items.price` para seleccionar propiedades, o `items` para incluir hasta 20 elementos completos. Las respuestas se limitan a 64 KB y el extracto de contexto a 4.000 caracteres. No se siguen redirecciones con credenciales. Si una consulta falla, no se inventan datos.
 
 Los conectores están deshabilitados en el hosting compartido. En tu instalación pueden consultar APIs públicas. Para un host privado que administras, configura explícitamente `IQT_ALLOW_PRIVATE_CONNECTORS=true` e `IQT_CONNECTOR_HOSTS=nombre-del-host`; nunca se permite el endpoint de metadatos de nube. Añade esas variables al servicio de Compose si lo necesitas. No expongas estos permisos a usuarios no confiables.
 

@@ -1,4 +1,4 @@
-import { randomBytes,scryptSync,timingSafeEqual } from 'node:crypto';
+import { randomBytes,scryptSync,timingSafeEqual,createHash } from 'node:crypto';
 export const same=(a,b)=>{const x=Buffer.from(a||''),y=Buffer.from(b||'');return x.length===y.length&&timingSafeEqual(x,y);};
 export class Auth {
   constructor({mode,password,origin,basePath,cuentas='http://redes-cuentas:8000/cuenta/auth',fetcher=fetch}) {
@@ -26,7 +26,7 @@ export class Auth {
   async identify(req) {
     if(this.mode==='standalone'){const session=this.sessions.get(this.cookie(req));return session?.expires>Date.now()?'owner':null;}
     if(!(req.headers.cookie||'').length)return null;
-    try {const r=await this.fetcher(this.cuentas,{headers:{Cookie:req.headers.cookie},redirect:'error',signal:AbortSignal.timeout(5000)});const id=r.headers.get('x-user-id');return r.status===200&&/^\d{1,15}$/.test(id||'')?'tools-'+id:null;}catch{return null;}
+    try {const r=await this.fetcher(this.cuentas,{headers:{Cookie:req.headers.cookie},redirect:'error',signal:AbortSignal.timeout(5000)});const id=r.headers.get('x-user-id'),email=r.headers.get('x-user-email')?.trim().toLowerCase();return r.status===200&&/^\d{1,15}$/.test(id||'')&&email?.includes('@')?'tools-'+id+'-'+createHash('sha256').update(email).digest('hex'):null;}catch{return null;}
   }
   logout(req){if(this.mode==='standalone')this.sessions.delete(this.cookie(req));return `iqt_wa=; HttpOnly; SameSite=Strict; Path=${this.basePath}; Max-Age=0${this.origin.startsWith('https:')?'; Secure':''}`;}
 }

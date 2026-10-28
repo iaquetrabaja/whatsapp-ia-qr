@@ -21,7 +21,7 @@ function display(s){
   $('provider').replaceChildren(...Object.entries(s.providers).map(([id,p])=>{const o=document.createElement('option');o.value=id;o.textContent=p.name;return o;}));
   for(const name of ['name','trigger','keyword','context','instructions','provider','model'])$(name).value=f[name];
   $('website-url').value=f.websiteUrl||'';$('auto-refresh').checked=f.autoRefresh!==false;
-  $('connector-url').value=f.connector?.url||'';$('connector-fields').value=f.connector?.fields||'';$('connector-enabled').checked=f.connector?.enabled||false;$('connector-auth').value='';$('connector-key-state').textContent=f.connectorSecretConfigured?'Autorización guardada. Deja el campo vacío para conservarla.':'Sin autorización guardada.';
+  $('connector-url').value=f.connector?.url||'';$('connector-fields').value=f.connector?.fields||'';$('connector-header').value=f.connector?.header||'Authorization';$('connector-enabled').checked=f.connector?.enabled||false;$('connector-auth').value='';$('connector-key-state').textContent=f.connectorSecretConfigured?'Autorización guardada. Deja el campo vacío para conservarla.':'Sin autorización guardada.';
   $('max-requests').value=f.maxRequests;$('max-tokens').value=f.maxTokens;$('pilot').checked=f.pilot;$('phones').value=f.allowedPhones.join(', ');$('enabled').checked=f.enabled;$('disclosure').checked=f.disclosureAccepted;$('api-key').value='';
   $('key-state').textContent=f.apiKeyConfigured?'Ya tienes una clave guardada para este proveedor. Deja el campo vacío para conservarla.':'Este proveedor aún no tiene una clave guardada.';provider();loaded=true;dirty=false;
  }
@@ -43,7 +43,7 @@ $('delete-key').onclick=()=>run(async()=>{await api('key/delete',{provider:$('pr
 $('export').onclick=()=>run(async()=>{const w=await api('export');const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([JSON.stringify(w,null,2)],{type:'application/json'}));a.download='automatizacion-whatsapp.json';a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);});
 $('import-file').onchange=()=>run(async()=>{const f=$('import-file').files[0];if(!f)return;if(f.size>50000)throw Error('El archivo supera 50 KB.');await api('import',{workspace:JSON.parse(await f.text())});loaded=false;await refresh();});
 $('website-start').onclick=()=>run(async()=>{await api('flow',{flow:draft(),apiKey:$('api-key').value});await api('website/start',{url:$('website-url').value.trim()});loaded=false;await refresh();});
-function connector(){return{enabled:$('connector-enabled').checked,url:$('connector-url').value.trim(),fields:$('connector-fields').value};}
+function connector(){return{enabled:$('connector-enabled').checked,url:$('connector-url').value.trim(),fields:$('connector-fields').value,header:$('connector-header').value};}
 $('connector-save').onclick=()=>run(async()=>{if(dirty)throw Error('Guarda primero los cambios del flujo.');await api('connector',{connector:connector(),authorization:$('connector-auth').value});loaded=false;await refresh();});
 $('connector-delete-secret').onclick=()=>run(async()=>{if(dirty)throw Error('Guarda primero el flujo.');await api('connector',{connector:connector(),removeSecret:true});loaded=false;await refresh();});
 $('connector-test').onclick=()=>run(async()=>{const r=await api('connector/test',{});$('connector-preview').textContent=r.text;});
