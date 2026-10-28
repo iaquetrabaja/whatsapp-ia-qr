@@ -26,7 +26,7 @@ export async function safeGet(raw,{maxBytes=500000,redirects=3,origin,headers={}
 const entities=s=>s.replace(/&(?:amp|lt|gt|quot|apos|nbsp);/g,x=>({'&amp;':'&','&lt;':'<','&gt;':'>','&quot;':'"','&apos;':"'",'&nbsp;':' '}[x])).replace(/&#(\d+);/g,(_,n)=>{const v=Number(n);return v>0&&v<=0x10ffff?String.fromCodePoint(v):' ';});
 export function pageText(html){return entities(html.replace(/<(script|style|noscript|svg)\b[^>]*>[\s\S]*?<\/\1>/gi,' ').replace(/<!--[\s\S]*?-->/g,' ').replace(/<\/(?:p|div|h[1-6]|li|section|br|tr)>/gi,'\n').replace(/<[^>]+>/g,' ')).replace(/[ \t]+/g,' ').replace(/\n\s*\n/g,'\n').trim();}
 export function robotsRules(text){let active=false;const rules=[];for(let line of text.split(/\r?\n/)){line=line.split('#')[0].trim();const m=line.match(/^(user-agent|allow|disallow)\s*:\s*(.*)$/i);if(!m)continue;if(m[1].toLowerCase()==='user-agent'){active=m[2]==='*'||m[2].toLowerCase().includes('iaquetrabaj');continue;}if(active&&m[2])rules.push({allow:m[1].toLowerCase()==='allow',path:m[2]});}return path=>{const matches=rules.filter(r=>new RegExp('^'+r.path.replace(/[.+?^${}()|[\]\\]/g,'\\$&').replace(/\*/g,'.*').replace(/\\\$$/,'$')).test(path)).sort((a,b)=>b.path.length-a.path.length||Number(b.allow)-Number(a.allow));return !matches.length||matches[0].allow;};}
-export async function crawlWebsite(raw,{maxPages=40,onProgress=()=>{},getter=safeGet}={}){
+export async function crawlWebsite(raw,{maxPages=200,onProgress=()=>{},getter=safeGet}={}){
  const start=validateUrl(raw);start.search='';
  const readRobots=async origin=>{try{return robotsRules((await getter(origin+'/robots.txt',{origin,maxBytes:100000})).text);}catch(e){if(e.message.includes('404'))return()=>true;throw Error('No se pudieron comprobar las reglas de rastreo de la web.');}};
  let allowed=await readRobots(start.origin);
@@ -34,11 +34,12 @@ export async function crawlWebsite(raw,{maxPages=40,onProgress=()=>{},getter=saf
  const initial=await getter(start.href),home=new URL(initial.url),origin=home.origin;
  if(origin!==start.origin)allowed=await readRobots(origin);
  if(!allowed(home.pathname))throw Error('La web no permite rastrear esta ruta en robots.txt. Puedes añadir el contexto manualmente.');
+ maxPages=Math.max(1,Math.min(500,Number(maxPages)||200));
  const queue=[home.href],visited=new Set(),pages=[],errors=[];let sitemapTruncated=false;
- try{const map=await getter(origin+'/sitemap.xml',{origin,maxBytes:500000});const locs=[...map.text.matchAll(/<loc>\s*([^<]+)\s*<\/loc>/gi)].map(m=>entities(m[1]));const maps=locs.filter(l=>/\.xml(?:\?|$)/.test(l)).slice(0,4);let urls=locs.filter(l=>!/\.xml(?:\?|$)/.test(l));for(const m of maps){if(new URL(m).origin!==origin)continue;try{const child=await getter(m,{origin,maxBytes:500000});urls.push(...[...child.text.matchAll(/<loc>\s*([^<]+)\s*<\/loc>/gi)].map(x=>entities(x[1])));}catch{}}
-  sitemapTruncated=urls.length>maxPages||locs.filter(l=>/\.xml(?:\?|$)/.test(l)).length>4;queue.push(...urls.slice(0,maxPages));
+ try{const map=await getter(origin+'/sitemap.xml',{origin,maxBytes:500000});const locs=[...map.text.matchAll(/<loc>\s*([^<]+)\s*<\/loc>/gi)].map(m=>entities(m[1]));const maps=locs.filter(l=>/\.xml(?:\?|$)/.test(l)).slice(0,20);let urls=locs.filter(l=>!/\.xml(?:\?|$)/.test(l));for(const m of maps){if(new URL(m).origin!==origin)continue;try{const child=await getter(m,{origin,maxBytes:500000});urls.push(...[...child.text.matchAll(/<loc>\s*([^<]+)\s*<\/loc>/gi)].map(x=>entities(x[1])));}catch{}}
+  sitemapTruncated=urls.length>maxPages||locs.filter(l=>/\.xml(?:\?|$)/.test(l)).length>20;queue.push(...urls.slice(0,maxPages));
  }catch{/* Missing sitemap: follow public internal links instead. */}
- const deadline=Date.now()+90000;
+ const deadline=Date.now()+600000;
  while(queue.length&&pages.length<maxPages&&visited.size<maxPages*2&&Date.now()<deadline){
   let u;try{u=validateUrl(queue.shift());}catch{continue;}u.search='';
   if(u.origin!==origin||visited.has(u.href)||!allowed(u.pathname)||/\.(?:jpg|png|webp|pdf|zip|mp4|css|js|xml)$/i.test(u.pathname)||/\/(?:wp-admin|wp-login|login|logout|cuenta|account|checkout|cart|carrito)(?:\/|$)/i.test(u.pathname))continue;

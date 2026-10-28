@@ -1,6 +1,6 @@
 {
   "name": "iqt-whatsapp-qr",
-  "version": "0.2.0",
+  "version": "1.0.0",
   "private": true,
   "type": "module",
   "description": "Automatizaciones de WhatsApp con IA por API, QR, espacios de usuario y despliegue propio",

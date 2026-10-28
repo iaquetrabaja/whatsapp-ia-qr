@@ -47,8 +47,8 @@ export class Engine {
     if (this.ledger.optedOut[chat] || this.ledger.paused[chat] > now) return { action: 'omit', reason: 'pausado o baja' };
     if (!this.config.enabled) return { action: 'omit', reason: 'automatización apagada' };
     if (this.config.pilot && !this.config.allowedPhones.includes(message.phone)) return { action: 'omit', reason: 'fuera de números de prueba' };
-    if (now - (this.ledger.lastReply[chat] || 0) < 300000) return { action: 'omit', reason: 'espera de 5 minutos en este chat' };
-    if (this.ledger.sent.length >= 200 || this.ledger.sent.filter(t => now - t < 3600000).length >= 20) return { action: 'omit', reason: 'límite de respuestas alcanzado' };
+    if (now - (this.ledger.lastReply[chat] || 0) < (this.config.cooldownSeconds??300)*1000) return { action: 'omit', reason: 'espera configurada en este chat' };
+    if (this.ledger.sent.length >= (this.config.dailyLimit??200) || this.ledger.sent.filter(t => now - t < 3600000).length >= (this.config.hourlyLimit??20)) return { action: 'omit', reason: 'límite de respuestas alcanzado' };
     return next;
   }
   recordSent(chat, now = Date.now()) { this.ledger.lastReply[digest(chat)] = now; this.ledger.sent.push(now); }

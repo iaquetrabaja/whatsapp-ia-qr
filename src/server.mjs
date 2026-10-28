@@ -6,7 +6,7 @@ import {Auth,same} from './auth.mjs';
 import {Vault,masterKey} from './vault.mjs';
 import {Runtime,Slots} from './runtime.mjs';
 import {newFlow,validateFlow,publicWorkspace,portableWorkspace} from './flows.mjs';
-import {PROVIDERS,ProviderError} from './providers.mjs';
+import {PROVIDERS,ProviderError,listModels} from './providers.mjs';
 import{crawlWebsite,validateUrl}from'./web-knowledge.mjs';
 import{validateConnector,connectorContext}from'./connectors.mjs';
 const ROOT=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
@@ -42,13 +42,13 @@ async function startWebsite(entry,flow,raw){
  crawling=true;
  try{
   const day=new Date().toISOString().slice(0,10),budget=await entry.vault.read('crawl-budget',{date:day,calls:0});if(budget.date!==day){budget.date=day;budget.calls=0;}
-  if(budget.calls>=2)throw new ProviderError('Máximo dos análisis de web por día y espacio en esta beta.',429);budget.calls++;await entry.vault.save('crawl-budget',budget);
+  if(budget.calls>=2)throw new ProviderError('Máximo dos análisis de web por día y espacio en este espacio.',429);budget.calls++;await entry.vault.save('crawl-budget',budget);
   if(flow.websiteUrl!==u.href){flow.enabled=false;await entry.vault.save('knowledge-'+flow.id,null);flow.websiteUrl=u.href;await entry.save();}
   entry.websiteJob={flowId:flow.id,status:'running',pages:0,url:u.href};
   entry.websiteTask=(async()=>{try{
-   const knowledge=await crawlWebsite(u.href,{maxPages:mode==='tools'?40:100,onProgress:p=>{entry.websiteJob={...entry.websiteJob,...p};}});
+   const knowledge=await crawlWebsite(u.href,{maxPages:mode==='tools'?200:500,onProgress:p=>{entry.websiteJob={...entry.websiteJob,...p};}});
    const current=entry.workspace.flows.find(f=>f.id===flow.id);if(!current||current.websiteUrl!==u.href)throw Error('El flujo cambió durante el análisis. Vuelve a analizar la web.');
-   await entry.vault.save('knowledge-'+flow.id,knowledge);current.websiteUrl=knowledge.url;await entry.save();
+   await entry.vault.save('knowledge-'+flow.id,knowledge);await entry.vault.save('summary-'+flow.id,{pages:knowledge.pages.length,url:knowledge.url,fetchedAt:knowledge.fetchedAt,truncated:knowledge.truncated});current.websiteUrl=knowledge.url;await entry.save();
    entry.websiteJob={flowId:flow.id,status:'completed',pages:knowledge.pages.length,truncated:knowledge.truncated,url:knowledge.url};
   }catch(e){entry.websiteJob={flowId:flow.id,status:'error',error:e.message};}finally{crawling=false;}})();
  }catch(e){crawling=false;throw e;}
@@ -65,7 +65,7 @@ const server=http.createServer(async(req,res)=>{
  if(req.headers.host!==publicUrl.host||(req.headers.origin&&req.headers.origin!==origin))return json(res,403,{error:'Origen no permitido'});
  const url=new URL(req.url,origin);
  try{
-  if(req.method==='GET'&&url.pathname==='/api/health')return json(res,200,{ok:true,version:'0.2.0'});
+  if(req.method==='GET'&&url.pathname==='/api/health')return json(res,200,{ok:true,version:'1.0.0'});
   if(req.method==='GET'&&url.pathname==='/'){res.writeHead(200,{'Content-Type':'text/html; charset=utf-8'});return res.end(html);}
   if(req.method==='GET'&&url.pathname==='/app.js'){res.writeHead(200,{'Content-Type':'text/javascript; charset=utf-8'});return res.end(js);}
   if(req.method==='POST'&&url.pathname==='/api/login'){
@@ -76,7 +76,7 @@ const server=http.createServer(async(req,res)=>{
   if(!user)return json(res,401,{error:'Inicia sesión para abrir tu espacio.',login:mode==='tools'?'/cuenta/entrar?next='+encodeURIComponent(basePath):null});
   const entry=await tenant(user);entry.cookie=req.headers.cookie||null;
   const {runtime,vault}=entry;
-  if(req.method==='GET'&&url.pathname==='/api/state'){const k=await vault.read('knowledge-'+runtime.flow().id,null);return json(res,200,{...runtime.state,...publicWorkspace(entry.workspace),events:runtime.events,budget:runtime.budget,websiteJob:entry.websiteJob||null,knowledge:k?{pages:k.pages.length,url:k.url,fetchedAt:k.fetchedAt,truncated:k.truncated}:null,csrf:vault.csrf(),providers:PROVIDERS,mode,connectionLimit:slots.max});}
+  if(req.method==='GET'&&url.pathname==='/api/state'){let k=await vault.read('summary-'+runtime.flow().id,null);if(!k){const legacy=await vault.read('knowledge-'+runtime.flow().id,null);if(legacy)k={pages:legacy.pages.length,url:legacy.url,fetchedAt:legacy.fetchedAt,truncated:legacy.truncated};}return json(res,200,{...runtime.state,...publicWorkspace(entry.workspace),events:runtime.events,pendingMessages:runtime.pendingMessages,budget:runtime.budget,websiteJob:entry.websiteJob||null,knowledge:k?{pages:k.pages,url:k.url,fetchedAt:k.fetchedAt,truncated:k.truncated}:null,csrf:vault.csrf(),providers:PROVIDERS,mode,connectionLimit:slots.max});}
   if(req.method==='GET'&&url.pathname==='/api/export'){res.setHeader('Content-Disposition','attachment; filename="automatizacion-whatsapp.json"');return json(res,200,portableWorkspace(entry.workspace));}
   if(req.method!=='POST')return json(res,404,{error:'No encontrado'});
   if(!same(req.headers['x-csrf-token'],vault.csrf()))return json(res,403,{error:'Actualiza el panel antes de continuar.'});
@@ -92,7 +92,7 @@ const server=http.createServer(async(req,res)=>{
    if(f.enabled&&!f.context.trim()&&(websiteChanged||!(await vault.read('knowledge-'+f.id,null))?.pages?.length))throw Error('Analiza la web antes de activar o escribe contexto manual.');
    if(typeof data.apiKey==='string'&&data.apiKey.trim()){if(data.apiKey.length>1000)throw Error('Clave no válida');entry.workspace.keys[f.provider]=data.apiKey.trim();}
    if(f.enabled&&!entry.workspace.keys[f.provider])throw Error('Guarda tu clave de API');
-   if(websiteChanged)await vault.save('knowledge-'+f.id,null);
+   if(websiteChanged){await vault.save('knowledge-'+f.id,null);await vault.save('summary-'+f.id,null);}
    entry.workspace.flows[index]=f;runtime.histories.clear();await entry.save();return json(res,200,{ok:true});
   }
   if(url.pathname==='/api/website/start'){await startWebsite(entry,runtime.flow(),data.url);return json(res,202,{ok:true});}
@@ -125,6 +125,7 @@ const server=http.createServer(async(req,res)=>{
    if(!Object.hasOwn(PROVIDERS,data.provider))throw Error('Proveedor no válido');for(const f of entry.workspace.flows)if(f.provider===data.provider)f.enabled=false;
    await runtime.queue;delete entry.workspace.keys[data.provider];await entry.save();return json(res,200,{ok:true});
   }
+  if(url.pathname==='/api/models'){const models=await listModels(data.provider,data.apiKey?.trim()||entry.workspace.keys[data.provider]);return json(res,200,{models});}
   if(url.pathname==='/api/test'){
    if(typeof data.text!=='string'||!data.text.trim()||data.text.length>2000)throw Error('Mensaje de hasta 2.000 caracteres');
    const result=await runtime.test(data.text);return json(res,200,{text:result.text});
@@ -144,6 +145,6 @@ const timer=setInterval(async()=>{
   if(!slots.members.has(e.runtime)&&Date.now()-e.at>30*60000){e.runtime.stop();entries.delete(id);}
  }}catch{/* Remain fail-closed on the next authenticated request. */}
 },5*60000);timer.unref();
-server.listen(port,process.env.IQT_HOST||'127.0.0.1',()=>console.log(`WhatsApp IA 0.2 · ${origin}${basePath} · ${mode}`));
+server.listen(port,process.env.IQT_HOST||'127.0.0.1',()=>console.log(`WhatsApp IA 1.0 · ${origin}${basePath} · ${mode}`));
 async function stop(){clearInterval(timer);for(const e of entries.values())e.runtime.stop();await Promise.allSettled([...entries.values()].map(e=>e.runtime.queue));server.close(()=>process.exit(0));}
 process.on('SIGINT',stop);process.on('SIGTERM',stop);

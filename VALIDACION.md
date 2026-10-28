@@ -11,3 +11,10 @@ Se generó un QR real en el contenedor alojado utilizando el adaptador con almac
 La recepción final de respuestas en un segundo teléfono y la persistencia de una cuenta ya vinculada requieren que el propietario escanee el QR con un número de prueba. No se encontró una clave Gemini existente para realizar una inferencia real; las pruebas de los cuatro proveedores utilizaron respuestas simuladas. Hay que introducir una clave propia y probarla antes de dar por validada una conversación completa.
 
 No se deben presentar llamadas simuladas, QR sin escanear o aceptación de un envío como una conversación completa verificada ni una garantía de estabilidad continua.
+
+
+## Versión 1.0.0 · ampliación de capacidad
+
+32 pruebas locales: contratos de cuatro catálogos, filtrado de modelos de pago, acceso, cifrado, aislamiento, cuotas, pausa, rastreo de 200 páginas y diez negocios concurrentes con 120 respuestas simuladas. Sesenta clientes de un negocio recibieron respuestas simuladas sin compartir espera. Los contadores, memoria y claves se comprobaron por cuenta. Estas pruebas no vinculan números ni hacen inferencia real.
+
+Catálogo real público de OpenRouter consultado: 17 modelos compatibles gratuitos en el momento de comprobación. Desplegable comprobado en navegador con ese catálogo. Gemini/Groq/OpenAI requieren la clave del propietario; sus catálogos se verificaron con respuestas simuladas. La conversación real con un número vinculado y una clave válida sigue pendiente. La versión 1.0.0 elimina la etiqueta beta, no añade una garantía de disponibilidad ni una conexión oficial de Meta.

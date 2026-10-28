@@ -1,0 +1,21 @@
+import{test}from'node:test';import assert from'node:assert/strict';import{Runtime,Slots}from'../src/runtime.mjs';import{newFlow,validateFlow}from'../src/flows.mjs';import{listModels}from'../src/providers.mjs';import{crawlWebsite}from'../src/web-knowledge.mjs';
+const response=text=>new Response(JSON.stringify({candidates:[{content:{parts:[{text}]}}]}));
+function runtime(i,slots,fetcher){const f={...newFlow(),context:'Business '+i,disclosureAccepted:true,pilot:false,enabled:true,cooldownSeconds:0};const w={flows:[f],activeFlowId:f.id,keys:{gemini:'key-'+i}};return new Runtime({vault:{folder:'unused',read:async(n,d)=>d,save:async()=>{}},workspace:w,save:async()=>{},slots,fetcher});}
+test('ten concurrent business accounts keep keys, prompts, budgets, histories and deliveries isolated',async()=>{
+ const slots=new Slots(10);let active=0,peak=0,calls=0;const runtimes=[];
+ for(let i=0;i<10;i++){const r=await runtime(i,slots,async(url,o)=>{active++;peak=Math.max(peak,active);assert.equal(o.headers['x-goog-api-key'],'key-'+i);assert.ok(JSON.parse(o.body).systemInstruction.parts[0].text.includes('Business '+i));await new Promise(resolve=>setTimeout(resolve,2));active--;calls++;return response('answer-'+i);}).init();r.state.connection='open';r.deliveries=[];r.client={send:async(chat,text)=>r.deliveries.push({chat,text})};runtimes.push(r);}
+ await Promise.all(runtimes.map((r,i)=>Promise.all(Array.from({length:12},(_,n)=>r.enqueue({id:'m'+n,chat:'same-client',text:'question-'+n,phone:'123456789'})))));
+ assert.equal(calls,120);assert.equal(peak,2);assert.equal(slots.ai,0);assert.equal(slots.waiters.length,0);
+ for(let i=0;i<10;i++){const r=runtimes[i];assert.equal(r.deliveries.length,12);assert.equal(r.pendingMessages,0);assert.equal(r.budget.calls,12);assert.equal(r.flow().enabled,true);assert.ok(r.deliveries.every(d=>d.text.endsWith('answer-'+i)));assert.equal(r.histories.get('same-client').turns.length,20);assert.ok(r.histories.get('same-client').turns.filter(t=>t.role==='assistant').every(t=>t.content==='answer-'+i));}
+});
+test('many distinct clients do not share a cooldown',async()=>{const r=await runtime(1,new Slots(),async()=>response('ok')).init();r.state.connection='open';let sent=0;r.client={send:async()=>sent++};await Promise.all(Array.from({length:60},(_,i)=>r.enqueue({id:'m'+i,chat:'client'+i,text:'hello',phone:'123456789'})));assert.equal(sent,60);assert.equal(r.histories.size,60);});
+test('business limits are editable but bounded',()=>{const f=newFlow();assert.equal(validateFlow({...f,maxRequests:10000,hourlyLimit:1000,cooldownSeconds:0}).maxRequests,10000);assert.throws(()=>validateFlow({...f,maxRequests:10001}));assert.throws(()=>validateFlow({...f,hourlyLimit:-1}));});
+test('model catalog filters incompatible and paid entries for all providers',async()=>{
+ const list=async(provider,data)=>listModels(provider,'test-key',async()=>new Response(JSON.stringify(data)));
+ assert.deepEqual((await list('gemini',{models:[{name:'models/chat',supportedGenerationMethods:['generateContent']},{name:'models/embed',supportedGenerationMethods:['embedContent']}]})).map(m=>m.id),['chat']);
+ assert.deepEqual((await list('openrouter',{data:[{id:'good:free',pricing:{prompt:'0',completion:'0'}},{id:'paid:free',pricing:{prompt:'1',completion:'0'}}]})).map(m=>m.id),['good:free']);
+ assert.deepEqual((await list('groq',{data:[{id:'chat',active:true},{id:'whisper-large'},{id:'old',active:false}]})).map(m=>m.id),['chat']);
+ assert.deepEqual((await list('openai',{data:[{id:'gpt-example'},{id:'gpt-image-test'},{id:'gpt-old',shutdown_date:'2020-01-01'}]})).map(m=>m.id),['gpt-example']);
+ await assert.rejects(()=>listModels('gemini',''));await assert.rejects(()=>listModels('invalid','key'));await assert.rejects(()=>listModels('groq','key',async()=>new Response('{}',{status:401})));
+});
+test('crawler reads over one hundred URLs and reports remaining limits accurately',async()=>{const getter=async url=>({url,type:'text/html',text:url.endsWith('robots.txt')?'User-agent: *':url.endsWith('sitemap.xml')?'<urlset>'+Array.from({length:220},(_,i)=>'<loc>https://shop.test/p'+i+'</loc>').join('')+'</urlset>':'<html><title>Shop</title><p>Useful product info</p></html>'});const k=await crawlWebsite('https://shop.test/',{maxPages:200,getter});assert.equal(k.pages.length,200);assert.equal(k.truncated,true);});
