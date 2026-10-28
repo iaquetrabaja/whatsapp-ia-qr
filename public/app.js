@@ -24,7 +24,7 @@ function display(s){
 }
 async function refresh(){display(await api('state'));}
 function draft(){const old=state.flows.find(f=>f.id===$('flows').value);return {...old,name:$('name').value,trigger:$('trigger').value,keyword:$('keyword').value,context:$('context').value,instructions:$('instructions').value,provider:$('provider').value,model:$('model').value,maxRequests:Number($('max-requests').value),maxTokens:Number($('max-tokens').value),pilot:$('pilot').checked,allowedPhones:$('phones').value.split(',').map(x=>x.trim()).filter(Boolean),enabled:$('enabled').checked,disclosureAccepted:$('disclosure').checked};}
-document.querySelectorAll('#workspace input:not(#import-file),#workspace textarea,#workspace select:not(#flows)').forEach(e=>e.addEventListener('input',()=>{dirty=true;}));
+document.querySelectorAll('#workspace input:not(#import-file),#workspace textarea:not(#test),#workspace select:not(#flows)').forEach(e=>e.addEventListener('input',()=>{dirty=true;}));
 $('provider').onchange=()=>{const p=state.providers[$('provider').value];$('model').value=p.model;$('api-key').value='';$('key-state').textContent='Introduce una clave para este proveedor o deja el campo vacío si ya guardaste una.';provider();dirty=true;};
 $('sign-in').onclick=()=>run(async()=>{await api('login',{password:$('password').value});$('password').value='';loaded=false;await refresh();});
 $('save').onclick=()=>run(async()=>{await api('flow',{flow:draft(),apiKey:$('api-key').value});loaded=false;await refresh();$('answer').textContent='Configuración guardada. Ya puedes probar la IA.';});
