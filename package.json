@@ -1,0 +1,10 @@
+{
+  "name": "iqt-whatsapp-qr",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "description": "Automatizaciones de WhatsApp con IA por API, QR, espacios de usuario y despliegue propio",
+  "engines": {"node": ">=22"},
+  "scripts": {"start": "node src/server.mjs", "test": "node --test test/*.test.mjs"},
+  "dependencies": {"@whiskeysockets/baileys": "7.0.0-rc14", "qrcode": "1.5.4", "pino": "10.4.0"}
+}

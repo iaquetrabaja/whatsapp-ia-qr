@@ -1,0 +1,8 @@
+node_modules
+data
+data-v2
+.git
+.env
+.env.*
+test
+*.zip

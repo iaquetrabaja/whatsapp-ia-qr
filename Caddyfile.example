@@ -1,0 +1,4 @@
+# Sustituye el dominio por uno propio y configura su DNS antes de iniciar Caddy.
+whatsapp.tudominio.com {
+    reverse_proxy 127.0.0.1:8787
+}

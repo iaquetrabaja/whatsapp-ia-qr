@@ -1,0 +1,40 @@
+const $=id=>document.getElementById(id);let state,csrf='',loaded=false,dirty=false;
+const route=name=>new URL('api/'+name,location.href).toString();
+async function api(name,data){const r=await fetch(route(name),{method:data===undefined?'GET':'POST',headers:data===undefined?{}:{'Content-Type':'application/json','X-CSRF-Token':csrf},...(data===undefined?{}:{body:JSON.stringify(data)})});const result=await r.json();if(!r.ok){if(r.status===401){$('workspace').hidden=true;$('login').hidden=false;if(result.login){$('tools-login').href=result.login;$('tools-login').hidden=false;$('local-login').hidden=true;}}throw Error(result.error);}return result;}
+async function run(fn){try{$('alert').textContent='';await fn();}catch(e){$('alert').textContent=e.message;}}
+function provider(){const p=state.providers[$('provider').value];$('pricing').textContent=p.pricing;$('get-key').href=p.keyUrl;}
+function display(s){
+ state=s;csrf=s.csrf;$('login').hidden=true;$('workspace').hidden=false;
+ const labels={open:'WhatsApp conectado',qr:'Escanea el QR',connecting:'Conectando…',closed:'Conexión cerrada',disconnected:'Sin conectar',error:'Revisar conexión',logged_out:'Sesión cerrada'};
+ $('connection').textContent=labels[s.connection]||s.connection;$('qr').hidden=!s.qr;if(s.qr)$('qr').src=s.qr;
+ $('connect').disabled=['open','qr','connecting'].includes(s.connection);
+ $('budget').textContent='Llamadas contabilizadas hoy: '+(s.budget.date===new Date().toISOString().slice(0,10)?s.budget.calls:0)+'. Las cuotas del proveedor son independientes.';
+ $('hosting').textContent=s.mode==='tools'?'Beta alojada: hasta '+s.connectionLimit+' conexiones simultáneas en total. Puedes cerrar el navegador y el ordenador; el proceso está en el servidor. Cerrar sesión en Tools o su caducidad detiene la conexión en el siguiente control.':'El programa debe seguir activo en tu servidor. Puedes cerrar el navegador; no detengas el servicio.';
+ $('activity').replaceChildren(...s.events.map(e=>{const li=document.createElement('li');li.textContent=new Date(e.time).toLocaleTimeString()+' · '+e.type+': '+e.result;return li;}));
+ if(s.error)$('alert').textContent=s.error;
+ if(!loaded){
+  const f=s.flows.find(f=>f.id===s.activeFlowId)||s.flows[0];
+  $('flows').replaceChildren(...s.flows.map(f=>{const o=document.createElement('option');o.value=f.id;o.textContent=f.name;return o;}));$('flows').value=f.id;
+  $('provider').replaceChildren(...Object.entries(s.providers).map(([id,p])=>{const o=document.createElement('option');o.value=id;o.textContent=p.name;return o;}));
+  for(const name of ['name','trigger','keyword','context','instructions','provider','model'])$(name).value=f[name];
+  $('max-requests').value=f.maxRequests;$('max-tokens').value=f.maxTokens;$('pilot').checked=f.pilot;$('phones').value=f.allowedPhones.join(', ');$('enabled').checked=f.enabled;$('disclosure').checked=f.disclosureAccepted;$('api-key').value='';
+  $('key-state').textContent=f.apiKeyConfigured?'Ya tienes una clave guardada para este proveedor. Deja el campo vacío para conservarla.':'Este proveedor aún no tiene una clave guardada.';provider();loaded=true;dirty=false;
+ }
+ if(!dirty){const f=s.flows.find(f=>f.id===s.activeFlowId);if(f)$('enabled').checked=f.enabled;}
+}
+async function refresh(){display(await api('state'));}
+function draft(){const old=state.flows.find(f=>f.id===$('flows').value);return {...old,name:$('name').value,trigger:$('trigger').value,keyword:$('keyword').value,context:$('context').value,instructions:$('instructions').value,provider:$('provider').value,model:$('model').value,maxRequests:Number($('max-requests').value),maxTokens:Number($('max-tokens').value),pilot:$('pilot').checked,allowedPhones:$('phones').value.split(',').map(x=>x.trim()).filter(Boolean),enabled:$('enabled').checked,disclosureAccepted:$('disclosure').checked};}
+document.querySelectorAll('#workspace input:not(#import-file),#workspace textarea,#workspace select:not(#flows)').forEach(e=>e.addEventListener('input',()=>{dirty=true;}));
+$('provider').onchange=()=>{const p=state.providers[$('provider').value];$('model').value=p.model;$('api-key').value='';$('key-state').textContent='Introduce una clave para este proveedor o deja el campo vacío si ya guardaste una.';provider();dirty=true;};
+$('sign-in').onclick=()=>run(async()=>{await api('login',{password:$('password').value});$('password').value='';loaded=false;await refresh();});
+$('save').onclick=()=>run(async()=>{await api('flow',{flow:draft(),apiKey:$('api-key').value});loaded=false;await refresh();$('answer').textContent='Configuración guardada. Ya puedes probar la IA.';});
+$('test-ai').onclick=()=>run(async()=>{if(dirty)throw Error('Guarda los cambios antes de probar.');$('test-ai').disabled=true;try{const r=await api('test',{text:$('test').value});$('answer').textContent=r.text;await refresh();}finally{$('test-ai').disabled=false;}});
+$('connect').onclick=()=>run(async()=>{await api('connect',{});await refresh();});
+$('disconnect').onclick=()=>run(async()=>{await api('disconnect',{});loaded=false;await refresh();});
+$('pause').onclick=()=>run(async()=>{await api('pause',{});$('enabled').checked=false;await refresh();});
+$('flows').onchange=()=>run(async()=>{if(dirty){$('flows').value=state.activeFlowId;throw Error('Guarda tus cambios antes de cambiar de flujo.');}await api('select',{id:$('flows').value});loaded=false;await refresh();});
+document.querySelectorAll('[data-template]').forEach(b=>b.onclick=()=>run(async()=>{if(dirty)throw Error('Guarda primero el flujo actual.');await api('new',{template:b.dataset.template});loaded=false;await refresh();}));
+$('delete-key').onclick=()=>run(async()=>{await api('key/delete',{provider:$('provider').value});loaded=false;await refresh();});
+$('export').onclick=()=>run(async()=>{const w=await api('export');const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([JSON.stringify(w,null,2)],{type:'application/json'}));a.download='automatizacion-whatsapp.json';a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);});
+$('import-file').onchange=()=>run(async()=>{const f=$('import-file').files[0];if(!f)return;if(f.size>50000)throw Error('El archivo supera 50 KB.');await api('import',{workspace:JSON.parse(await f.text())});loaded=false;await refresh();});
+run(refresh);setInterval(()=>{if(loaded)refresh().catch(e=>{$('alert').textContent=e.message;});},4000);
