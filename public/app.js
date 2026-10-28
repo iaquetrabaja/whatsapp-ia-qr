@@ -12,19 +12,24 @@ function display(s){
  $('hosting').textContent=s.mode==='tools'?'Beta alojada: hasta '+s.connectionLimit+' conexiones simultáneas en total. Puedes cerrar el navegador y el ordenador; el proceso está en el servidor. Cerrar sesión en Tools o su caducidad detiene la conexión en el siguiente control.':'El programa debe seguir activo en tu servidor. Puedes cerrar el navegador; no detengas el servicio.';
  $('activity').replaceChildren(...s.events.map(e=>{const li=document.createElement('li');li.textContent=new Date(e.time).toLocaleTimeString()+' · '+e.type+': '+e.result;return li;}));
  if(s.error)$('alert').textContent=s.error;
+ const job=s.websiteJob&&s.websiteJob.flowId===s.activeFlowId?s.websiteJob:null;
+ $('website-status').textContent=job?.status==='running'?'Analizando la web: '+job.pages+' páginas leídas…':job?.status==='error'?'No se completó: '+job.error+(s.knowledge?' Se conserva el conocimiento anterior.':''):s.knowledge?s.knowledge.pages+' páginas indexadas. Revisión: '+new Date(s.knowledge.fetchedAt).toLocaleString()+(s.knowledge.truncated?' · Análisis parcial: quedan páginas fuera del límite.':''):'Todavía no hay una web analizada para este flujo.';
+ $('website-start').disabled=job?.status==='running';$('connector-card').hidden=s.mode!=='standalone';
  if(!loaded){
   const f=s.flows.find(f=>f.id===s.activeFlowId)||s.flows[0];
   $('flows').replaceChildren(...s.flows.map(f=>{const o=document.createElement('option');o.value=f.id;o.textContent=f.name;return o;}));$('flows').value=f.id;
   $('provider').replaceChildren(...Object.entries(s.providers).map(([id,p])=>{const o=document.createElement('option');o.value=id;o.textContent=p.name;return o;}));
   for(const name of ['name','trigger','keyword','context','instructions','provider','model'])$(name).value=f[name];
+  $('website-url').value=f.websiteUrl||'';$('auto-refresh').checked=f.autoRefresh!==false;
+  $('connector-url').value=f.connector?.url||'';$('connector-fields').value=f.connector?.fields||'';$('connector-enabled').checked=f.connector?.enabled||false;$('connector-auth').value='';$('connector-key-state').textContent=f.connectorSecretConfigured?'Autorización guardada. Deja el campo vacío para conservarla.':'Sin autorización guardada.';
   $('max-requests').value=f.maxRequests;$('max-tokens').value=f.maxTokens;$('pilot').checked=f.pilot;$('phones').value=f.allowedPhones.join(', ');$('enabled').checked=f.enabled;$('disclosure').checked=f.disclosureAccepted;$('api-key').value='';
   $('key-state').textContent=f.apiKeyConfigured?'Ya tienes una clave guardada para este proveedor. Deja el campo vacío para conservarla.':'Este proveedor aún no tiene una clave guardada.';provider();loaded=true;dirty=false;
  }
  if(!dirty){const f=s.flows.find(f=>f.id===s.activeFlowId);if(f)$('enabled').checked=f.enabled;}
 }
 async function refresh(){display(await api('state'));}
-function draft(){const old=state.flows.find(f=>f.id===$('flows').value);return {...old,name:$('name').value,trigger:$('trigger').value,keyword:$('keyword').value,context:$('context').value,instructions:$('instructions').value,provider:$('provider').value,model:$('model').value,maxRequests:Number($('max-requests').value),maxTokens:Number($('max-tokens').value),pilot:$('pilot').checked,allowedPhones:$('phones').value.split(',').map(x=>x.trim()).filter(Boolean),enabled:$('enabled').checked,disclosureAccepted:$('disclosure').checked};}
-document.querySelectorAll('#workspace input:not(#import-file),#workspace textarea:not(#test),#workspace select:not(#flows)').forEach(e=>e.addEventListener('input',()=>{dirty=true;}));
+function draft(){const old=state.flows.find(f=>f.id===$('flows').value);return {...old,name:$('name').value,trigger:$('trigger').value,keyword:$('keyword').value,context:$('context').value,websiteUrl:$('website-url').value.trim(),autoRefresh:$('auto-refresh').checked,instructions:$('instructions').value,provider:$('provider').value,model:$('model').value,maxRequests:Number($('max-requests').value),maxTokens:Number($('max-tokens').value),pilot:$('pilot').checked,allowedPhones:$('phones').value.split(',').map(x=>x.trim()).filter(Boolean),enabled:$('enabled').checked,disclosureAccepted:$('disclosure').checked};}
+document.querySelectorAll('#workspace input:not(#import-file),#workspace textarea:not(#test),#workspace select:not(#flows)').forEach(e=>{if(!e.closest('#connector-card'))e.addEventListener('input',()=>{dirty=true;});});
 $('provider').onchange=()=>{const p=state.providers[$('provider').value];$('model').value=p.model;$('api-key').value='';$('key-state').textContent='Introduce una clave para este proveedor o deja el campo vacío si ya guardaste una.';provider();dirty=true;};
 $('sign-in').onclick=()=>run(async()=>{await api('login',{password:$('password').value});$('password').value='';loaded=false;await refresh();});
 $('save').onclick=()=>run(async()=>{await api('flow',{flow:draft(),apiKey:$('api-key').value});loaded=false;await refresh();$('answer').textContent='Configuración guardada. Ya puedes probar la IA.';});
@@ -37,4 +42,9 @@ document.querySelectorAll('[data-template]').forEach(b=>b.onclick=()=>run(async(
 $('delete-key').onclick=()=>run(async()=>{await api('key/delete',{provider:$('provider').value});loaded=false;await refresh();});
 $('export').onclick=()=>run(async()=>{const w=await api('export');const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([JSON.stringify(w,null,2)],{type:'application/json'}));a.download='automatizacion-whatsapp.json';a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);});
 $('import-file').onchange=()=>run(async()=>{const f=$('import-file').files[0];if(!f)return;if(f.size>50000)throw Error('El archivo supera 50 KB.');await api('import',{workspace:JSON.parse(await f.text())});loaded=false;await refresh();});
+$('website-start').onclick=()=>run(async()=>{await api('flow',{flow:draft(),apiKey:$('api-key').value});await api('website/start',{url:$('website-url').value.trim()});loaded=false;await refresh();});
+function connector(){return{enabled:$('connector-enabled').checked,url:$('connector-url').value.trim(),fields:$('connector-fields').value};}
+$('connector-save').onclick=()=>run(async()=>{if(dirty)throw Error('Guarda primero los cambios del flujo.');await api('connector',{connector:connector(),authorization:$('connector-auth').value});loaded=false;await refresh();});
+$('connector-delete-secret').onclick=()=>run(async()=>{if(dirty)throw Error('Guarda primero el flujo.');await api('connector',{connector:connector(),removeSecret:true});loaded=false;await refresh();});
+$('connector-test').onclick=()=>run(async()=>{const r=await api('connector/test',{});$('connector-preview').textContent=r.text;});
 run(refresh);setInterval(()=>{if(loaded)refresh().catch(e=>{$('alert').textContent=e.message;});},4000);

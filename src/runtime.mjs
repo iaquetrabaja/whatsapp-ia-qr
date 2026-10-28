@@ -1,9 +1,10 @@
 import { Engine,normalize } from './engine.mjs';
 import { WhatsApp } from './whatsapp.mjs';
 import { generate,systemPrompt,ProviderError } from './providers.mjs';
+import{relevantKnowledge}from'./web-knowledge.mjs';import{connectorContext}from'./connectors.mjs';
 export class Runtime {
-  constructor({vault,workspace,save,slots,fetcher=fetch}) {
-    Object.assign(this,{vault,workspace,save,slots,fetcher});this.state={connection:'disconnected',qr:null,error:null};this.events=[];this.queue=Promise.resolve();this.histories=new Map();this.closed=false;
+  constructor({vault,workspace,save,slots,fetcher=fetch,mode='standalone'}) {
+    Object.assign(this,{vault,workspace,save,slots,fetcher,mode});this.state={connection:'disconnected',qr:null,error:null};this.events=[];this.queue=Promise.resolve();this.histories=new Map();this.closed=false;
     this.client=new WhatsApp({folder:vault.folder,vault,onStatus:s=>{this.state={...this.state,...s};if(s.error)for(const f of this.workspace.flows)f.enabled=false;if(['closed','logged_out','error','disconnected'].includes(s.connection))this.slots.release(this);},onMessage:m=>this.enqueue(m)});
   }
   async init(){this.engine=new Engine({enabled:false,pilot:true,allowedPhones:[],rules:[]},await this.vault.read('ledger',{}));this.budget=await this.vault.read('budget',{date:'',calls:0});return this;}
@@ -15,14 +16,17 @@ export class Runtime {
     this.budget.calls++;await this.vault.save('budget',this.budget);
   }
   async answer(flow,text,conversation) {
-    if(!flow.disclosureAccepted||!flow.context.trim())throw new ProviderError('Añade contexto y acepta el envío al proveedor de IA antes de probar.');
+    const knowledge=await this.vault.read('knowledge-'+flow.id,null);
+    if(!flow.disclosureAccepted||(!flow.context.trim()&&!knowledge?.pages?.length))throw new ProviderError('Añade contexto o analiza una web y acepta el envío al proveedor de IA antes de probar.');
     const key=this.workspace.keys[flow.provider];if(!key)throw new ProviderError('Guarda tu clave del proveedor.');
     if(this.slots.ai>=2)throw new ProviderError('Hay otras peticiones en curso. Prueba dentro de un momento.',429);
     this.slots.ai++;
     try {
       await this.reserve(flow);
       const old=this.histories.get(conversation);const history=old&&Date.now()-old.at<30*60000?old.turns:[];
-      const result=await generate({provider:flow.provider,model:flow.model,apiKey:key,system:systemPrompt(flow),messages:[...history,{role:'user',content:text}],maxTokens:flow.maxTokens},this.fetcher);
+      const privateHosts=this.mode==='standalone'&&process.env.IQT_ALLOW_PRIVATE_CONNECTORS==='true'?(process.env.IQT_CONNECTOR_HOSTS||'').split(',').map(s=>s.trim()).filter(Boolean):[];
+      const apiData=await connectorContext(flow.connector,this.workspace.connectorSecrets?.[flow.id],{mode:this.mode,privateHosts});
+      const result=await generate({provider:flow.provider,model:flow.model,apiKey:key,system:systemPrompt(flow)+relevantKnowledge(knowledge,text)+apiData,messages:[...history,{role:'user',content:text}],maxTokens:flow.maxTokens},this.fetcher);
       this.histories.delete(conversation);this.histories.set(conversation,{at:Date.now(),turns:[...history,{role:'user',content:text.slice(0,2000)},{role:'assistant',content:result.text}].slice(-6)});
       while(this.histories.size>30)this.histories.delete(this.histories.keys().next().value);
       return result;

@@ -14,8 +14,33 @@ Plataforma abierta de automatizaciones de WhatsApp con **Gemini, Groq, modelos g
 - Prueba del modelo sin enviar mensajes a WhatsApp.
 - QR de conexión, pausa, atención humana, bajas, límites y registro de actividad.
 - Exportación/importación de flujos, sin claves, teléfonos de prueba ni sesión vinculada.
+- Base de conocimiento desde una URL: sitemap y enlaces internos, con fuentes y actualización diaria mientras el espacio está cargado en el servicio.
+- En tu servidor, conectores GET para añadir al contexto datos actuales de tu API, con campos permitidos y autorización cifrada.
 
-No es todavía un constructor de acciones arbitrarias. No ejecuta reservas, pedidos, pagos, webhooks ni herramientas externas. La IA redacta respuestas. El siguiente paso para integrar acciones debe incluir permisos y validación de cada operación.
+No es todavía un constructor de acciones arbitrarias. No ejecuta reservas, pedidos, pagos ni webhooks de escritura. La IA redacta respuestas y, si configuras un conector en tu instalación, utiliza sus consultas de solo lectura. Las acciones que modifiquen tu web deben implementarse con permisos y validación de cada operación.
+
+## Aprender de la web sin entrenar otro modelo
+
+Indica la URL pública y pulsa **Guardar y analizar web**. El servidor consulta robots.txt, sitemap y enlaces del mismo dominio, extrae texto HTML y conserva las fuentes. Antes de responder, selecciona fragmentos relacionados con la pregunta y los añade al contexto del modelo. Puedes combinarlo con tus instrucciones manuales.
+
+Esto es una base de conocimiento consultable, no un entrenamiento de los pesos del modelo ni aprendizaje indiscriminado de conversaciones. No se incorporan automáticamente respuestas de clientes como hechos. Se excluyen áreas de acceso, no se ejecuta JavaScript remoto y no se permiten destinos privados en el rastreador.
+
+Límites de la beta: hasta 40 páginas alojadas, 100 en una instalación propia, dos análisis diarios por espacio y unos 90 segundos por análisis. Si queda incompleto se indica; no se afirma que toda una web grande se haya leído. La actualización diaria funciona mientras el servicio está activo y el espacio permanece cargado; tras un reinicio o una sesión caducada, entra de nuevo. Si falla una actualización del mismo sitio, se conserva la última versión. Cambiar de sitio limpia el conocimiento anterior.
+
+## Conectar APIs en tu propio servidor
+
+En la tarjeta **Consulta la API de tu web**, configura:
+
+1. URL exacta del endpoint GET, sin secretos ni parámetros en la URL.
+2. Campos JSON permitidos, por ejemplo `products,stock.available`.
+3. Autorización opcional, por ejemplo `Bearer TU_TOKEN`; se cifra y nunca se añade al prompt ni se exporta.
+4. Guarda y prueba la consulta. Actívala cuando hayas verificado qué información recibe el modelo.
+
+Se consulta el endpoint al preparar una respuesta y solo se añaden al modelo los campos elegidos. Si la raíz de la respuesta es un array, usa el campo `items` (hasta 20 elementos). Las respuestas se limitan a 64 KB y el extracto de contexto a 4.000 caracteres. No se siguen redirecciones con credenciales. Si una consulta falla, no se inventan datos.
+
+Los conectores están deshabilitados en el hosting compartido. En tu instalación pueden consultar APIs públicas. Para un host privado que administras, configura explícitamente `IQT_ALLOW_PRIVATE_CONNECTORS=true` e `IQT_CONNECTOR_HOSTS=nombre-del-host`; nunca se permite el endpoint de metadatos de nube. Añade esas variables al servicio de Compose si lo necesitas. No expongas estos permisos a usuarios no confiables.
+
+Puedes ampliar `src/connectors.mjs` y `src/runtime.mjs` para tus integraciones. Para acciones de escritura, usa una lista explícita de operaciones, credenciales con permisos mínimos y confirmación humana antes de ejecutar; el proyecto no entrega al modelo una función genérica para ejecutar cualquier petición HTTP.
 
 ## Dos formas de usarlo
 

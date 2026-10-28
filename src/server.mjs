@@ -7,6 +7,8 @@ import {Vault,masterKey} from './vault.mjs';
 import {Runtime,Slots} from './runtime.mjs';
 import {newFlow,validateFlow,publicWorkspace,portableWorkspace} from './flows.mjs';
 import {PROVIDERS,ProviderError} from './providers.mjs';
+import{crawlWebsite,validateUrl}from'./web-knowledge.mjs';
+import{validateConnector,connectorContext}from'./connectors.mjs';
 const ROOT=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
 const DATA=path.resolve(process.env.IQT_DATA_DIR||path.join(ROOT,'data-v2'));
 await mkdir(DATA,{recursive:true,mode:0o700});
@@ -19,6 +21,7 @@ if(publicUrl.protocol!=='https:'&&!['127.0.0.1','localhost'].includes(publicUrl.
 const mode=process.env.IQT_AUTH_MODE||'standalone';
 const auth=new Auth({mode,password:process.env.IQT_PASSWORD,origin,basePath});
 const entries=new Map(),slots=new Slots(Math.max(1,Math.min(10,Number(process.env.IQT_MAX_CONNECTIONS||2))));
+let crawling=false;
 const loading=new Map();
 async function tenant(id){
  if(entries.has(id)){const e=entries.get(id);e.at=Date.now();return e;}
@@ -27,11 +30,28 @@ async function tenant(id){
  const pending=(async()=>{
   const vault=new Vault(DATA,key,id);let workspace=await vault.read('workspace',null);
   if(!workspace){const f=newFlow();workspace={flows:[f],activeFlowId:f.id,keys:{}};}
-  for(const f of workspace.flows)f.enabled=false;
+  workspace.flows=workspace.flows.map(f=>({...newFlow(),...f,enabled:false}));workspace.connectorSecrets??={};
   const entry={vault,workspace,at:Date.now(),cookie:null,rate:[]};
   entry.save=()=>vault.save('workspace',{...entry.workspace,flows:entry.workspace.flows.map(f=>({...f,enabled:false}))});
-  entry.runtime=await new Runtime({vault,workspace,save:entry.save,slots}).init();entries.set(id,entry);return entry;
+  entry.runtime=await new Runtime({vault,workspace,save:entry.save,slots,mode}).init();entries.set(id,entry);return entry;
  })();loading.set(id,pending);try{return await pending;}finally{loading.delete(id);}
+}
+async function startWebsite(entry,flow,raw){
+ if(crawling)throw new ProviderError('Hay otra web analizándose. Prueba en unos minutos.',429);
+ const u=validateUrl(raw);if(u.search)throw Error('Indica la URL pública sin parámetros ni claves.');
+ crawling=true;
+ try{
+  const day=new Date().toISOString().slice(0,10),budget=await entry.vault.read('crawl-budget',{date:day,calls:0});if(budget.date!==day){budget.date=day;budget.calls=0;}
+  if(budget.calls>=2)throw new ProviderError('Máximo dos análisis de web por día y espacio en esta beta.',429);budget.calls++;await entry.vault.save('crawl-budget',budget);
+  if(flow.websiteUrl!==u.href){flow.enabled=false;await entry.vault.save('knowledge-'+flow.id,null);flow.websiteUrl=u.href;await entry.save();}
+  entry.websiteJob={flowId:flow.id,status:'running',pages:0,url:u.href};
+  entry.websiteTask=(async()=>{try{
+   const knowledge=await crawlWebsite(u.href,{maxPages:mode==='tools'?40:100,onProgress:p=>{entry.websiteJob={...entry.websiteJob,...p};}});
+   const current=entry.workspace.flows.find(f=>f.id===flow.id);if(!current||current.websiteUrl!==u.href)throw Error('El flujo cambió durante el análisis. Vuelve a analizar la web.');
+   await entry.vault.save('knowledge-'+flow.id,knowledge);current.websiteUrl=knowledge.url;await entry.save();
+   entry.websiteJob={flowId:flow.id,status:'completed',pages:knowledge.pages.length,truncated:knowledge.truncated,url:knowledge.url};
+  }catch(e){entry.websiteJob={flowId:flow.id,status:'error',error:e.message};}finally{crawling=false;}})();
+ }catch(e){crawling=false;throw e;}
 }
 const html=await readFile(path.join(ROOT,'public/index.html')),js=await readFile(path.join(ROOT,'public/app.js'));
 function json(res,code,data){res.writeHead(code,{'Content-Type':'application/json; charset=utf-8'});res.end(JSON.stringify(data));}
@@ -56,7 +76,7 @@ const server=http.createServer(async(req,res)=>{
   if(!user)return json(res,401,{error:'Inicia sesión para abrir tu espacio.',login:mode==='tools'?'/cuenta/entrar?next='+encodeURIComponent(basePath):null});
   const entry=await tenant(user);entry.cookie=req.headers.cookie||null;
   const {runtime,vault}=entry;
-  if(req.method==='GET'&&url.pathname==='/api/state')return json(res,200,{...runtime.state,...publicWorkspace(entry.workspace),events:runtime.events,budget:runtime.budget,csrf:vault.csrf(),providers:PROVIDERS,mode,connectionLimit:slots.max});
+  if(req.method==='GET'&&url.pathname==='/api/state'){const k=await vault.read('knowledge-'+runtime.flow().id,null);return json(res,200,{...runtime.state,...publicWorkspace(entry.workspace),events:runtime.events,budget:runtime.budget,websiteJob:entry.websiteJob||null,knowledge:k?{pages:k.pages.length,url:k.url,fetchedAt:k.fetchedAt,truncated:k.truncated}:null,csrf:vault.csrf(),providers:PROVIDERS,mode,connectionLimit:slots.max});}
   if(req.method==='GET'&&url.pathname==='/api/export'){res.setHeader('Content-Disposition','attachment; filename="automatizacion-whatsapp.json"');return json(res,200,portableWorkspace(entry.workspace));}
   if(req.method!=='POST')return json(res,404,{error:'No encontrado'});
   if(!same(req.headers['x-csrf-token'],vault.csrf()))return json(res,403,{error:'Actualiza el panel antes de continuar.'});
@@ -65,10 +85,25 @@ const server=http.createServer(async(req,res)=>{
   if(url.pathname==='/api/flow'){
    await runtime.queue;const f=validateFlow(data.flow),index=entry.workspace.flows.findIndex(x=>x.id===f.id);
    if(index<0)throw Error('El flujo no pertenece a este espacio');
+   const prior=entry.workspace.flows[index],websiteChanged=(prior.websiteUrl||'')!==f.websiteUrl;
+   if(websiteChanged&&entry.websiteJob?.status==='running'&&entry.websiteJob.flowId===f.id)throw Error('Espera a que termine el análisis antes de cambiar la URL.');
    if(f.enabled&&runtime.state.connection!=='open')throw Error('Conecta WhatsApp antes de activar');
+   if(f.connector?.enabled||f.connector?.url)f.connector=validateConnector(f.connector,mode);
+   if(f.enabled&&!f.context.trim()&&(websiteChanged||!(await vault.read('knowledge-'+f.id,null))?.pages?.length))throw Error('Analiza la web antes de activar o escribe contexto manual.');
    if(typeof data.apiKey==='string'&&data.apiKey.trim()){if(data.apiKey.length>1000)throw Error('Clave no válida');entry.workspace.keys[f.provider]=data.apiKey.trim();}
    if(f.enabled&&!entry.workspace.keys[f.provider])throw Error('Guarda tu clave de API');
+   if(websiteChanged)await vault.save('knowledge-'+f.id,null);
    entry.workspace.flows[index]=f;runtime.histories.clear();await entry.save();return json(res,200,{ok:true});
+  }
+  if(url.pathname==='/api/website/start'){await startWebsite(entry,runtime.flow(),data.url);return json(res,202,{ok:true});}
+  if(url.pathname==='/api/connector'){
+   await runtime.queue;const f=runtime.flow(),connector=validateConnector(data.connector,mode);f.connector=connector;
+   if(typeof data.authorization==='string'&&data.authorization.trim()){if(data.authorization.length>1500)throw Error('Autorización demasiado larga');entry.workspace.connectorSecrets[f.id]=data.authorization.trim();}
+   if(data.removeSecret===true)delete entry.workspace.connectorSecrets[f.id];await entry.save();return json(res,200,{ok:true});
+  }
+  if(url.pathname==='/api/connector/test'){
+   const f=runtime.flow(),privateHosts=mode==='standalone'&&process.env.IQT_ALLOW_PRIVATE_CONNECTORS==='true'?(process.env.IQT_CONNECTOR_HOSTS||'').split(',').map(s=>s.trim()).filter(Boolean):[];
+   const text=await connectorContext({...f.connector,enabled:true},entry.workspace.connectorSecrets[f.id],{mode,privateHosts});return json(res,200,{text});
   }
   if(url.pathname==='/api/new'){
    await runtime.queue;if(entry.workspace.flows.length>=3)throw Error('Máximo tres automatizaciones');
@@ -79,9 +114,10 @@ const server=http.createServer(async(req,res)=>{
    for(const f of entry.workspace.flows)f.enabled=false;entry.workspace.activeFlowId=data.id;runtime.histories.clear();await entry.save();return json(res,200,{ok:true});
   }
   if(url.pathname==='/api/import'){
+   if(entry.websiteJob?.status==='running')throw Error('Espera a que termine el análisis antes de importar flujos.');
    await runtime.queue;const w=data.workspace;
    if(w?.version!==2||!Array.isArray(w.flows)||!w.flows.length||w.flows.length>3)throw Error('Archivo de automatización no válido');
-   const flows=w.flows.map(f=>validateFlow({...f,enabled:false,disclosureAccepted:false,pilot:true,allowedPhones:[]}));
+   const flows=w.flows.map(f=>validateFlow({...newFlow(),...f,connector:mode==='tools'?{enabled:false,url:'',fields:''}:{...f.connector,enabled:false},enabled:false,disclosureAccepted:false,pilot:true,allowedPhones:[]}));
    if(new Set(flows.map(f=>f.id)).size!==flows.length)throw Error('Identificadores repetidos');
    entry.workspace.flows=flows;entry.workspace.activeFlowId=flows.some(f=>f.id===w.activeFlowId)?w.activeFlowId:flows[0].id;runtime.histories.clear();await entry.save();return json(res,200,{ok:true});
   }
@@ -104,6 +140,7 @@ server.requestTimeout=15000;server.headersTimeout=10000;
 const timer=setInterval(async()=>{
  try{for(const[id,e]of entries){
   if(mode==='tools'&&slots.members.has(e.runtime)&&e.cookie&&!(await auth.identify({headers:{cookie:e.cookie}}))){await e.runtime.disconnect();e.runtime.state.error='La sesión de Tools ha caducado o se ha revocado';}
+  if(!crawling)for(const f of e.workspace.flows){if(!f.autoRefresh||!f.websiteUrl)continue;const k=await e.vault.read('knowledge-'+f.id,null);if(k&&Date.now()-k.fetchedAt>=86400000&&Date.now()-(e.lastAutoAttempt||0)>3600000){e.lastAutoAttempt=Date.now();startWebsite(e,f,f.websiteUrl).catch(()=>{});break;}}
   if(!slots.members.has(e.runtime)&&Date.now()-e.at>30*60000){e.runtime.stop();entries.delete(id);}
  }}catch{/* Remain fail-closed on the next authenticated request. */}
 },5*60000);timer.unref();

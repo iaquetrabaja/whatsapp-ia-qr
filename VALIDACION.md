@@ -2,6 +2,8 @@
 
 Las pruebas automatizadas verifican reglas de seguridad, autenticación, CSRF, aislamiento de espacios, cifrado de claves, exportación sin secretos, contratos de los cuatro proveedores, límites, bajas, errores de cuota y ausencia de respuestas después de pausar.
 
+También comprueban bloqueo de redes privadas y metadatos, respeto de robots.txt, lectura de sitemap/enlaces internos, recuperación de información de las páginas y filtrado de campos de API sin exponer su autorización. Se probó una lectura real de dos páginas públicas de iaquetrabaja.com; el resultado se marcó parcial al limitarlo deliberadamente a dos páginas.
+
 Los contratos de proveedores se prueban con respuestas simuladas. Una prueba simulada no demuestra que una clave real tenga saldo o cuota. Las comprobaciones reales de proveedores y del QR se registran por separado en el informe de entrega; no se guardan claves en este repositorio.
 
 En la versión anterior se generó un QR real sin vincular un número y sin enviar mensajes. La nueva persistencia cifrada también debe comprobarse contra la conexión real antes de declararla validada. La recepción final de respuestas en un segundo teléfono requiere que el propietario vincule un número de prueba.
